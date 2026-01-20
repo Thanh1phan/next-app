@@ -6,8 +6,7 @@ import { Upload, FileSpreadsheet, CheckCircle, X, Settings, Check, Download } fr
 import { ExcelViewer } from '@/components/excel-viewer';
 import { Input } from '@heroui/input';
 import { Button } from '@heroui/button';
-import { Card, Form, NumberInput, Select, SelectItem } from '@heroui/react';
-import { span } from 'framer-motion/client';
+import { Card, Form, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader, NumberInput, Select, SelectItem, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow, useDisclosure } from '@heroui/react';
 
 interface HeaderMapping {
     col: number;
@@ -17,10 +16,18 @@ interface HeaderMapping {
     sheet: string;
 }
 
-interface DataStartCell {
+interface Cell {
     row: number;
     col: number;
     sheet: string;
+}
+
+interface CellError extends Cell {
+    err?: string;
+    index?: number;
+}
+
+interface DataStartCell extends Cell {
     field?: string;
 }
 
@@ -36,10 +43,34 @@ interface Field {
     isRequired?: boolean;
 }
 
+interface TryCastResult<T> {
+    success: boolean;
+    value: T | null;
+    error?: string;
+}
+
+interface SubmitResult<T = any> {
+    isSuccess: boolean;
+    data: T;
+}
 
 type Step = 'select_mode' | 'select_headers' | 'select_data_start' | 'configure';
 
-// Hàm check xem giá trị có null/empty không
+const Tables: Table[] = [
+    {
+        tableName: 'Asset',
+        fields: [{ fieldName: 'Name', type: 'string', isRequired: true },
+        { fieldName: 'Code', type: 'string', isRequired: true },
+        { fieldName: 'StartUsingDate', type: 'date' },
+        { fieldName: 'OriginalPrice', type: 'number' }],
+    },
+    {
+        tableName: 'User',
+        fields: [{ fieldName: 'Name', type: 'string' },
+        { fieldName: 'DateOfBirth', isRequired: true, type: 'date' }]
+    },
+]
+
 const isEmptyValue = (value: any): boolean => {
     return value === null ||
         value === undefined ||
@@ -47,62 +78,79 @@ const isEmptyValue = (value: any): boolean => {
         (typeof value === 'string' && value.trim() === "");
 };
 
-const extractDataWithConfig = (
-    workbook: XLSX.WorkBook,
-    dataStartCells: DataStartCell[],
-    headerMappings: HeaderMapping[],
-    hasHeader: boolean
-): (string | number | boolean | null)[][] => {
+const tryCast = (
+    value: any,
+    type: 'string' | 'number' | 'bool' | 'date'
+): TryCastResult<any> => {
 
-    const result: (string | number | boolean | null)[][] = [];
-
-    const headerRow = hasHeader
-        ? headerMappings.map(h => h.displayName)
-        : dataStartCells.map(d => d.field || `Column_${d.col}`);
-    result.push(headerRow);
-
-    const columnData: any[][] = dataStartCells.map(cfg => {
-        const worksheet = workbook.Sheets[cfg.sheet];
-        if (!worksheet) return [];
-
-        const sheetData = XLSX.utils.sheet_to_json(worksheet, {
-            header: 1,
-            defval: null
-        }) as any[][];
-
-        const data: any[] = [];
-        for (let i = cfg.row; i < sheetData.length; i++) {
-            const row = sheetData[i] || [];
-            data.push(row[cfg.col] ?? null);
-        }
-
-        return data;
-    });
-
-    const maxRows = Math.max(...columnData.map(col => col.length), 0);
-
-    for (let rowIdx = 0; rowIdx < maxRows; rowIdx++) {
-        const dataRow: (string | number | boolean | null)[] = [];
-        let allEmpty = true;
-
-        for (let colIdx = 0; colIdx < dataStartCells.length; colIdx++) {
-            const value = columnData[colIdx][rowIdx] ?? null;
-            dataRow.push(value);
-
-            if (!isEmptyValue(value)) {
-                allEmpty = false;
-            }
-        }
-
-        if (allEmpty) {
-            break;
-        }
-
-        result.push(dataRow);
+    if (value === undefined || value === null || value === '') {
+        return { success: true, value: null };
     }
 
-    return result;
-};
+    try {
+        switch (type) {
+            case 'number': {
+                const num = Number(value);
+                if (isNaN(num)) {
+                    return {
+                        success: false,
+                        value: null,
+                        error: `"${value}" không phải là số`
+                    };
+                }
+                return { success: true, value: num };
+            }
+
+            case 'bool': {
+                if (typeof value === 'boolean') {
+                    return { success: true, value };
+                }
+
+                if (value === 1 || value === '1' || value === 'true') {
+                    return { success: true, value: true };
+                }
+
+                if (value === 0 || value === '0' || value === 'false') {
+                    return { success: true, value: false };
+                }
+
+                return {
+                    success: false,
+                    value: null,
+                    error: `"${value}" không phải boolean`
+                };
+            }
+
+            case 'date': {
+                const date = new Date(value);
+                if (isNaN(date.getTime())) {
+                    return {
+                        success: false,
+                        value: null,
+                        error: `"${value}" không phải ngày hợp lệ`
+                    };
+                }
+                return {
+                    success: true,
+                    value: date.toISOString()
+                };
+            }
+
+            case 'string':
+            default:
+                return {
+                    success: true,
+                    value: value.toString()
+                };
+        }
+    } catch (err) {
+        return {
+            success: false,
+            value: null,
+            error: (err as Error).message
+        };
+    }
+}
 
 export default function ExcelImporter() {
     const [file, setFile] = useState<File | null>(null);
@@ -117,20 +165,13 @@ export default function ExcelImporter() {
     const [sheetsConfigured, setsheetsConfigured] = useState<Set<string>>(new Set());
     const [table, setTable] = useState<string>();
     const [fields, setFileds] = useState<Field[]>([]);
+    const [extractedData, setExtractedData] = useState<Record<string, any>[]>([]);
+    const [previewData, setPreviewData] = useState<Record<string, any>[]>([]);
+    const { isOpen, onOpen, onOpenChange } = useDisclosure();
+    const [cellError, setCellError] = useState<CellError[]>([]);
+    const [errors, setErrors] = useState<Record<string, string[]>>({});
 
-    const tables: Table[] = ([
-        {
-            tableName: 'Asset',
-            fields: [{ fieldName: 'Name', type: 'string', isRequired: true },
-            { fieldName: 'Code', type: 'string', isRequired: true },
-            { fieldName: 'OriginalPrice', type: 'number' }]
-        },
-        {
-            tableName: 'User',
-            fields: [{ fieldName: 'Name', type: 'string' },
-            { fieldName: 'DateOfBirth', isRequired: true, type: 'date' }]
-        },
-    ])
+    const tables: Table[] = (Tables)
 
     const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const uploadedFile = e.target.files?.[0];
@@ -159,6 +200,11 @@ export default function ExcelImporter() {
         setSelectedHeaderCells(new Set());
         setDataStartCells([]);
         setsheetsConfigured(new Set());
+        setCellError([]);
+        setFileds(prev => prev.map(f => ({
+            ...f,
+            isSelected: false
+        })));
     };
 
     const handleSelectMode = (withHeader: boolean) => {
@@ -227,6 +273,9 @@ export default function ExcelImporter() {
         if (step === 'select_headers' || step === 'select_data_start') {
             return 'bg-white hover:bg-gray-100 cursor-pointer';
         }
+        if (cellError.some(cell => cell.row === rowIdx && cell.col === colIdx && cell.sheet === sheet)) {
+            return 'bg-red-600 font-semibold border-2 border-blue-500';
+        }
         return 'bg-white';
     };
 
@@ -246,23 +295,22 @@ export default function ExcelImporter() {
         setStep('configure');
     };
 
-    const updateHeaderName = (col: number, rowIndex: number, newName: string, sheet: string) => {
-        setHeaderMappings(prev => prev.map(m =>
-            m.col === col && m.rowIndex === rowIndex && m.sheet === sheet ? { ...m, displayName: newName } : m
+    const updateHeaderName = (index: number, newName: string) => {
+        setHeaderMappings(prev => prev.map((item, idx) =>
+            idx == index ? { ...item, displayName: newName } : item
         ));
     };
 
-    const updateDataStartRow = (col: number, newRow: number, sheet: string) => {
-        setDataStartCells(prev => prev.map(m =>
-            m.col === col && m.sheet === sheet ? { ...m, row: newRow - 1 } : m
+    const updateDataStartRow = (index: number, newRow: number) => {
+        setDataStartCells(prev => prev.map((item, idx) =>
+            idx == index ? { ...item, row: newRow - 1 } : item
         ));
     };
 
-    const updateDataField = (col: number, sheet: string, newField?: string, oldField?: string) => {
-        setDataStartCells(prev => prev.map(m =>
-            m.col === col && m.sheet === sheet ? { ...m, field: newField } : m
+    const updateDataField = (index: number, newField?: string, oldField?: string) => {
+        setDataStartCells(prev => prev.map((item, idx) =>
+            idx == index ? { ...item, field: newField } : item
         ));
-        console.log(fields)
 
         if (oldField) {
             setFileds(prev => prev.map(f => ({
@@ -277,40 +325,108 @@ export default function ExcelImporter() {
         }
     };
 
+    const checkRequiredFields = () => {
+        const mappedFields = new Set(
+            dataStartCells.map(d => d.field)
+        );
+
+        return fields
+            .filter(f => f.isRequired)
+            .every(f => mappedFields.has(f.fieldName));
+    };
+
     const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         if (!workbook) return;
 
-        const unmappedCells = dataStartCells.filter(cell => !cell.field);
-        if (unmappedCells.length > 0) {
-            alert(`Vui lòng chọn trường mapping cho tất cả ${unmappedCells.length} cột!`);
+        if (!checkRequiredFields()) {
+            alert('Có trường bắt buộc chưa được mapping data!')
             return;
         }
+        const result = extractDataWithConfig(workbook, dataStartCells, fields);
+        setExtractedData(result.data);
+        setPreviewData(result.data.map((d, i) => ({
+            key: `key_${i}`,
+            ...d
+        })));
+        if (!result.isSuccess) {
+            const uniqueIndexes = new Set(cellError.map(c => c.index));
 
-        try {
-            const extractedData = extractDataWithConfig(
-                workbook,
-                dataStartCells,
-                headerMappings,
-                hasHeader ?? false
+            const newErrors = Array.from(uniqueIndexes).reduce<Record<string, string[]>>(
+                (acc, index) => addValidationError(acc, `field${index}`, 'Lỗi mapping kiểu dữ liệu'),
+                {}
             );
 
-            // Tạo workbook mới
-            const wb = XLSX.utils.book_new();
-            const ws = XLSX.utils.aoa_to_sheet(extractedData);
-            XLSX.utils.book_append_sheet(wb, ws, "Extracted Data");
-
-            // Download file
-            XLSX.writeFile(wb, `extracted_data_${Date.now()}.xlsx`);
-
-            const rowCount = extractedData.length - 1; // Trừ header
-            alert(`Extract thành công ${rowCount} dòng dữ liệu!\n(Dừng khi tất cả cột đều trống)`);
-        } catch (error) {
-            console.error("Lỗi khi extract:", error);
-            alert("Có lỗi xảy ra khi extract dữ liệu!");
+            setErrors(newErrors);
         }
+        onOpen();
     };
 
+    const extractDataWithConfig = (
+        workbook: XLSX.WorkBook,
+        dataStartCells: DataStartCell[],
+        fields: Field[]
+    ): SubmitResult<Record<string, any>[]> => {
+        const result: Record<string, any>[] = [];
+        let isSuccess: boolean = true;
+
+        const columnData: any[][] = dataStartCells.map(cfg => {
+            const worksheet = workbook.Sheets[cfg.sheet];
+            if (!worksheet) return [];
+
+            const sheetData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][];
+            const data: any[] = [];
+            for (let i = cfg.row; i < sheetData.length; i++) {
+                const row = sheetData[i] || [];
+                data.push(row[cfg.col] ?? null);
+            }
+            return data;
+        });
+
+        const maxRows = Math.max(...columnData.map(col => col.length), 0);
+
+        for (let rowIdx = 0; rowIdx < maxRows; rowIdx++) {
+            const dataRow: Record<string, any> = {};
+            let allEmpty = true;
+
+            for (let colIdx = 0; colIdx < dataStartCells.length; colIdx++) {
+                const value = columnData[colIdx][rowIdx] ?? null;
+                const fieldName = dataStartCells[colIdx].field || `Column_${colIdx}`;
+                const field = fields.find(f => f.fieldName === fieldName);
+
+                let res = tryCast(value, field?.type ?? 'string')
+                if (!res.success) {
+                    const startCol = dataStartCells[colIdx].col;
+                    const startRow = dataStartCells[colIdx].row;
+                    const sheet = dataStartCells[colIdx].sheet;
+                    const field = dataStartCells[colIdx].field;
+                    const mess = res.error ?? '';
+                    setCellError(prev => [...prev, { col: startCol, row: startRow + rowIdx, sheet: sheet, index: colIdx, err: mess }]);
+                    isSuccess = false;
+                }
+                dataRow[fieldName] = res.success ? res.value : res.error;
+                if (!isEmptyValue(value)) {
+                    allEmpty = false;
+                }
+            }
+
+            if (allEmpty) break;
+            result.push(dataRow);
+        }
+
+        return { isSuccess: isSuccess, data: result };
+    };
+
+    const addValidationError = (
+        errors: Record<string, string[]>,
+        field: string,
+        message: string
+    ): Record<string, string[]> => {
+        return {
+            ...errors,
+            [field]: [...(errors[field] ?? []), message]
+        };
+    }
     const resetFile = () => {
         setFile(null);
         setWorkbook(null);
@@ -346,7 +462,7 @@ export default function ExcelImporter() {
                         </div>
                     ) : (
                         <>
-                            <div className="mb-6 flex items-center justify-between border border-blue-200 p-4 rounded-lg">
+                            <div className="mb-6 flex items-center justify-between border-2 border-blue-200 rounded-lg shadow-md p-4">
                                 <div className="flex items-center gap-3">
                                     <CheckCircle className="text-green-600" />
                                     <div>
@@ -376,7 +492,7 @@ export default function ExcelImporter() {
                                         <div className="mb-4">
                                             <Select
                                                 className="max-w-xs"
-                                                label="Chọn table mapping"
+                                                label="Chọn table"
                                                 placeholder="Chọn table"
                                                 variant="bordered"
 
@@ -393,7 +509,7 @@ export default function ExcelImporter() {
                                             </Select>
                                         </div>
 
-                                        {step === 'select_mode' && table && (
+                                        {table && step === 'select_mode' && table && (
                                             <div className="space-y-4">
                                                 <p className="text-sm font-semibold mb-3">
                                                     Dữ liệu của bạn có header không?
@@ -417,8 +533,11 @@ export default function ExcelImporter() {
                                         {step === 'select_headers' && (
                                             <div className="space-y-4">
                                                 <div className="border-2 border-gray-200 p-3 rounded-lg">
-                                                    <p className="text-sm">
-                                                        <strong>Đã chọn:</strong> {headerMappings.length} header
+                                                    <p className="text-sm  font-semibold">
+                                                        📌 Click vào các ô để chọn header
+                                                    </p>
+                                                    <p className="text-sm mt-2">
+                                                        <strong>Đã chọn:</strong> {headerMappings.length} / {fields.length} header
                                                     </p>
                                                 </div>
                                                 <div className="grid grid-cols-2 gap-2">
@@ -442,15 +561,13 @@ export default function ExcelImporter() {
 
                                         {step === 'select_data_start' && (
                                             <div className="space-y-4">
-                                                <div className="bg-amber-50 p-3 rounded-lg">
-                                                    <p className="text-sm text-amber-800 font-semibold">
+                                                <div className="border-2 border-gray-200 p-3 rounded-lg">
+                                                    <p className="text-sm font-semibold">
                                                         📌 Click vào các ô để chọn điểm bắt đầu
                                                     </p>
-                                                    {dataStartCells.length > 0 && (
-                                                        <p className="text-sm text-amber-700 mt-2">
-                                                            Đã chọn: <strong>{dataStartCells.length} ô</strong>
-                                                        </p>
-                                                    )}
+                                                    <p className="text-sm mt-2">
+                                                        <strong>Đã chọn:</strong> {dataStartCells.length} / {fields.length} ô
+                                                    </p>
                                                 </div>
                                                 <div className="grid grid-cols-2 gap-2">
                                                     <button
@@ -475,6 +592,7 @@ export default function ExcelImporter() {
                                             <Form
                                                 className='w-full grid grid-cols-1'
                                                 onSubmit={onSubmit}
+                                                validationErrors={errors}
                                             >
                                                 {hasHeader ? (
                                                     <div>
@@ -482,15 +600,7 @@ export default function ExcelImporter() {
                                                             Headers ({headerMappings.length}):
                                                         </h4>
                                                         <div className="w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-96 overflow-y-auto p-2">
-                                                            {headerMappings.sort((a, b) => {
-                                                                if (a.sheet !== b.sheet) {
-                                                                    return a.sheet.localeCompare(b.sheet);
-                                                                }
-                                                                if (a.col !== b.col) {
-                                                                    return a.col - b.col;
-                                                                }
-                                                                return a.rowIndex - b.rowIndex;
-                                                            }).map((mapping, idx) => (
+                                                            {headerMappings.map((mapping, idx) => (
                                                                 <Card key={idx} className="p-2 space-y-2">
                                                                     <div className='grid grid-cols-2 justify-items-stretch mb-1'>
                                                                         <p className="text-xs">
@@ -501,13 +611,13 @@ export default function ExcelImporter() {
                                                                     <Input
                                                                         type="text"
                                                                         value={mapping.displayName}
-                                                                        onChange={(e) => updateHeaderName(mapping.col, mapping.rowIndex, e.target.value, mapping.sheet)}
+                                                                        onChange={(e) => updateHeaderName(idx, e.target.value)}
                                                                         label='Header:'
                                                                     />
                                                                     <NumberInput
                                                                         type="number"
                                                                         value={dataStartCells[idx].row + 1}
-                                                                        onChange={(e) => updateDataStartRow(mapping.col, Number(e), mapping.sheet)}
+                                                                        onChange={(e) => updateDataStartRow(idx, Number(e))}
                                                                         label='Dòng bắt đầu:'
                                                                         isRequired
                                                                         minValue={1}
@@ -515,18 +625,19 @@ export default function ExcelImporter() {
                                                                     <Select
                                                                         label="Trường"
                                                                         placeholder="Chọn trường"
-                                                                        disabledKeys={fields.filter(f => f.isSelected).map(f => f.fieldName)}
+                                                                        disabledKeys={fields.filter(f => f.isSelected && f.fieldName != dataStartCells[idx].field).map(f => f.fieldName)}
                                                                         onChange={(e) => {
-                                                                            updateDataField(dataStartCells[idx].col, dataStartCells[idx].sheet, e.target.value, dataStartCells[idx].field);
+                                                                            updateDataField(idx, e.target.value, dataStartCells[idx].field);
                                                                         }}
                                                                         isRequired
+                                                                        name={'field' + idx}
                                                                     >
                                                                         {fields?.map((f) => (
                                                                             <SelectItem
                                                                                 key={f.fieldName}
                                                                                 textValue={f.fieldName}
                                                                             >
-                                                                                {f.fieldName} {f.isRequired && <span className='text-red-600'>*</span>}
+                                                                                {f.fieldName} ({f.type}) {f.isRequired && <span className='text-red-600'>*</span>}
                                                                             </SelectItem>
                                                                         ))}
                                                                     </Select>
@@ -539,15 +650,7 @@ export default function ExcelImporter() {
                                                         Columns ({dataStartCells.length}):
                                                     </h4>
                                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-96 overflow-y-auto p-2">
-                                                        {dataStartCells.sort((a, b) => {
-                                                            if (a.sheet !== b.sheet) {
-                                                                return a.sheet.localeCompare(b.sheet);
-                                                            }
-                                                            if (a.col !== b.col) {
-                                                                return a.col - b.col;
-                                                            }
-                                                            return a.row - b.row;
-                                                        }).map((mapping, idx) => (
+                                                        {dataStartCells.map((mapping, idx) => (
                                                             <Card key={idx} className="p-2 space-y-2">
                                                                 <div className='grid grid-cols-2 justify-items-stretch mb-1'>
                                                                     <p className="text-xs">
@@ -558,7 +661,7 @@ export default function ExcelImporter() {
                                                                 <NumberInput
                                                                     type="number"
                                                                     value={mapping.row + 1}
-                                                                    onChange={(e) => updateDataStartRow(mapping.col, Number(e), mapping.sheet)}
+                                                                    onChange={(e) => updateDataStartRow(idx, Number(e))}
                                                                     label='Dòng bắt đầu:'
                                                                 />
                                                                 <Select
@@ -566,7 +669,7 @@ export default function ExcelImporter() {
                                                                     placeholder="Chọn trường"
                                                                     disabledKeys={fields.filter(f => f.isSelected).map(f => f.fieldName)}
                                                                     onChange={(e) => {
-                                                                        updateDataField(mapping.col, mapping.sheet, e.target.value, mapping.field);
+                                                                        updateDataField(idx, e.target.value, mapping.field);
                                                                     }}
                                                                 >
                                                                     {fields.map((f) => (
@@ -597,7 +700,6 @@ export default function ExcelImporter() {
                                         )}
                                     </div>
 
-                                    {/* Excel Viewer */}
                                     {table && <div className="lg:col-span-2">
                                         <ExcelViewer
                                             workbook={workbook}
@@ -615,6 +717,49 @@ export default function ExcelImporter() {
                     )}
                 </div>
             </div>
+
+            <Modal size='5xl' isOpen={isOpen} onOpenChange={onOpenChange}>
+                <ModalContent>
+                    {(onClose) => (
+                        <>
+                            <ModalHeader className="flex flex-col gap-1">Dữ liệu trích xuất</ModalHeader>
+                            <ModalBody>
+                                <Table
+                                    aria-label="Table with dynamic content"
+                                    maxTableHeight={400}
+                                    isVirtualized
+                                >
+                                    <TableHeader columns={fields.map(f => ({ key: f.fieldName, label: f.fieldName }))}>
+                                        {(column) => <TableColumn key={column.key}>{column.label}</TableColumn>}
+                                    </TableHeader>
+                                    <TableBody items={previewData}>
+                                        {(item) => (
+                                            <TableRow key={item.key}>
+                                                {(columnKey) => (
+                                                    <TableCell>{item[columnKey]}</TableCell>
+                                                )}
+                                            </TableRow>
+                                        )}
+                                    </TableBody>
+                                </Table>
+                            </ModalBody>
+                            <ModalFooter>
+                                <Button color="danger" onPress={onClose}>
+                                    Đóng
+                                </Button>
+                                {cellError.length === 0 &&
+                                    <Button color="primary" onPress={() => {
+                                        console.log(extractedData);
+                                        onClose();
+                                        alert('Xuất thành công!')
+                                    }}>
+                                        Xuất
+                                    </Button>}
+                            </ModalFooter>
+                        </>
+                    )}
+                </ModalContent>
+            </Modal>
         </div >
     );
 }
