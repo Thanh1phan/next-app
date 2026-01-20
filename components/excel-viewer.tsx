@@ -75,7 +75,6 @@ export function ExcelViewer({
         }
         return readOnly ? 'bg-white' : 'bg-white hover:bg-gray-100 cursor-pointer';
     };
-
     const excelColName = (col: number): string => {
         let name = '';
         while (col >= 0) {
@@ -84,9 +83,8 @@ export function ExcelViewer({
         }
         return name;
     };
-
     return (
-        <div className="border-2 border-blue-200 rounded-lg p-0.5 shadow-md overflow-hidden mt-4">
+        <div className="border-2 border-blue-200 rounded-lg shadow-md overflow-hidden mt-4">
             <div className="flex border-b overflow-x-auto">
                 <Tabs
                     key='tab-underlined'
@@ -108,12 +106,25 @@ export function ExcelViewer({
                 </Tabs>
             </div>
 
-            <div className="overflow-hidden bg-gray-100 border-b border-gray-300">
-                <div style={{ width: maxCols * colWidth + 50, minWidth: '100%' }}>
-                    <table className="border-collapse">
-                        <thead>
+            {/* Table Viewer */}
+            <div
+                ref={tableRef}
+                className="overflow-auto relative bg-white"
+                onScroll={handleScroll}
+                style={{ height: '600px', width: '100%' }}
+            >
+                <div style={{
+                    height: data.length * rowHeight,
+                    width: maxCols * colWidth,
+                    position: 'relative'
+                }}>
+                    <table className="w-full absolute border-collapse" style={{
+                        top: startRow * rowHeight,
+                        left: 0
+                    }}>
+                        <thead className="sticky top-0 z-20 bg-gray-100">
                             <tr style={{ height: rowHeight }}>
-                                <th className="border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-700 bg-gray-100" style={{ width: '50px' }}>
+                                <th className="border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-700 bg-gray-100 sticky left-0 z-30" style={{ width: '50px' }}>
                                     #
                                 </th>
                                 {Array.from({ length: maxCols }).map((_, colIdx) => (
@@ -127,31 +138,12 @@ export function ExcelViewer({
                                 ))}
                             </tr>
                         </thead>
-                    </table>
-                </div>
-            </div>
-
-            <div
-                ref={tableRef}
-                className="overflow-auto relative bg-white"
-                onScroll={handleScroll}
-                style={{ height: '564px', width: '100%' }}
-            >
-                <div style={{
-                    height: data.length * rowHeight,
-                    width: maxCols * colWidth + 50,
-                    position: 'relative'
-                }}>
-                    <table className="w-full absolute border-collapse" style={{
-                        top: startRow * rowHeight,
-                        left: 0
-                    }}>
                         <tbody>
                             {data.slice(startRow, endRow).map((row, relRowIdx) => {
                                 const rowIdx = startRow + relRowIdx;
                                 return (
                                     <tr key={rowIdx} style={{ height: rowHeight }}>
-                                        <td className="border border-gray-300 text-gray-600 px-2 py-1 text-xs bg-gray-100 font-semibold text-center" style={{ width: '50px' }}>
+                                        <td className="border border-gray-300 text-gray-600 px-2 py-1 text-xs bg-gray-100 font-semibold text-center sticky left-0 z-10" style={{ width: '50px' }}>
                                             {rowIdx + 1}
                                         </td>
                                         {Array.from({ length: maxCols }).map((_, colIdx) => {
