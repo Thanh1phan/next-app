@@ -205,6 +205,8 @@ export default function ExcelImporter() {
             ...f,
             isSelected: false
         })));
+        setErrors({});
+        setCellError([]);
     };
 
     const handleSelectMode = (withHeader: boolean) => {
@@ -337,6 +339,8 @@ export default function ExcelImporter() {
 
     const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
+        setErrors({});
+        setCellError([]);
         if (!workbook) return;
 
         if (!checkRequiredFields()) {
