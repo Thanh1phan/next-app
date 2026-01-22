@@ -1,5 +1,4 @@
 import { Tabs, Tab } from "@heroui/react";
-import { div } from "framer-motion/client";
 import { CircleCheck } from "lucide-react";
 import React, { useState, useRef, useMemo, useCallback } from 'react';
 import * as XLSX from 'xlsx';
@@ -32,7 +31,7 @@ export function ExcelViewer({
     const selectedSheet = externalSelectedSheet || internalSelectedSheet;
     const sheets = workbook.SheetNames;
 
-    const rowHeight = 36;
+    const rowHeight = 24;
     const colWidth = 120;
     const visibleRows = 20;
 
@@ -85,8 +84,31 @@ export function ExcelViewer({
         return name;
     };
 
+    const [hoveredCell, setHoveredCell] = useState<{ rowIdx: number; colIdx: number; text: string; position: { top: number; left: number } } | null>(null);
+
+    const handleMouseEnter = (event: React.MouseEvent<HTMLTableCellElement>, rowIdx: number, colIdx: number, text: any) => {
+        const cellText = text ? text.toString() : '';
+        if (cellText.length > 13) {
+            const rect = event.currentTarget.getBoundingClientRect();
+            let left = rect.right + 10;
+            if (left + 300 > window.innerWidth) {
+                left = rect.left - 310;
+            }
+            setHoveredCell({
+                rowIdx,
+                colIdx,
+                text: cellText,
+                position: { top: rect.top, left }
+            });
+        }
+    };
+
+    const handleMouseLeave = () => {
+        setHoveredCell(null);
+    };
+
     return (
-        <div className="border-2 border-blue-200 rounded-lg p-0.5 shadow-md overflow-hidden mt-4">
+        <div className="border-2 border-blue-200 rounded-lg p-0.5 shadow-md overflow-hidden">
             <div className="flex border-b overflow-x-auto">
                 <Tabs
                     key='tab-underlined'
@@ -155,6 +177,7 @@ export function ExcelViewer({
                                             {rowIdx + 1}
                                         </td>
                                         {Array.from({ length: maxCols }).map((_, colIdx) => {
+                                            const cellValue = row[colIdx] || '';
                                             const cellClassName = getCellClassName
                                                 ? getCellClassName(rowIdx, colIdx, selectedSheet)
                                                 : defaultCellClassName(rowIdx, colIdx);
@@ -163,6 +186,8 @@ export function ExcelViewer({
                                                 <td
                                                     key={colIdx}
                                                     onClick={() => handleCellClick(rowIdx, colIdx)}
+                                                    onMouseEnter={(e) => handleMouseEnter(e, rowIdx, colIdx, cellValue)}
+                                                    onMouseLeave={handleMouseLeave}
                                                     className={`border text-gray-600 border-gray-300 px-3 py-2 text-sm ${cellClassName}`}
                                                     style={{
                                                         minWidth: colWidth,
@@ -172,7 +197,7 @@ export function ExcelViewer({
                                                         whiteSpace: 'nowrap'
                                                     }}
                                                 >
-                                                    {row[colIdx] || ''}
+                                                    {cellValue}
                                                 </td>
                                             );
                                         })}
@@ -182,6 +207,18 @@ export function ExcelViewer({
                         </tbody>
                     </table>
                 </div>
+
+                {hoveredCell && (
+                    <div
+                        className="fixed z-50 bg-gray-100 text-gray-500 border rounded border-gray-300 shadow-lg p-2 max-w-xs whitespace-normal overflow-auto max-h-40 pointer-events-none"
+                        style={{
+                            top: `${hoveredCell.position.top}px`,
+                            left: `${hoveredCell.position.left}px`,
+                        }}
+                    >
+                        {hoveredCell.text}
+                    </div>
+                )}
             </div>
         </div>
     );
