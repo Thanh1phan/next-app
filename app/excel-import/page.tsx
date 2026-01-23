@@ -63,12 +63,12 @@ const Tables: Table[] = [
         tableName: 'Nhân viên',
         fields: [
             //Thông tin nhân sự – cơ bản
-            { fieldName: 'bhxhCode', nameDisplay: 'Mã số BHXH', type: 'string', isRequired: true },
-            { fieldName: 'ctvCode', nameDisplay: 'Mã số CTV', type: 'string', isRequired: true },
-            { fieldName: 'fullName', nameDisplay: 'Họ Tên', type: 'string', isRequired: true },
-            { fieldName: 'organization', nameDisplay: 'Đơn vị', type: 'string', isRequired: true },
-            { fieldName: 'department', nameDisplay: 'TTVT/PBH', type: 'string', isRequired: true },
-            { fieldName: 'jobTitle', nameDisplay: 'Chức danh công việc', type: 'string', isRequired: true },
+            { fieldName: 'bhxhCode', nameDisplay: 'Mã số BHXH', type: 'string', isRequired: false },
+            { fieldName: 'ctvCode', nameDisplay: 'Mã số CTV', type: 'string', isRequired: false },
+            { fieldName: 'fullName', nameDisplay: 'Họ Tên', type: 'string', isRequired: false },
+            { fieldName: 'organization', nameDisplay: 'Đơn vị', type: 'string', isRequired: false },
+            { fieldName: 'department', nameDisplay: 'TTVT/PBH', type: 'string', isRequired: false },
+            { fieldName: 'jobTitle', nameDisplay: 'Chức danh công việc', type: 'string', isRequired: false },
 
             //Ngày công & lương cơ bản
             { fieldName: 'standardWorkingDays', nameDisplay: 'Ngày công chuẩn', type: 'number', isRequired: false },
@@ -824,6 +824,14 @@ export default function ExcelImporter() {
                                                                         </p>
                                                                         <p className='justify-self-end text-xs'>{mapping.sheet}</p>
                                                                     </div>
+
+                                                                    <Input
+                                                                        type="text"
+                                                                        value={mapping.displayName}
+                                                                        onChange={(e) => updateHeaderName(idx, e.target.value)}
+                                                                        label='Header:'
+                                                                        disabled
+                                                                    />
                                                                     <Select
                                                                         label="Trường"
                                                                         placeholder="Chọn trường"
@@ -844,12 +852,6 @@ export default function ExcelImporter() {
                                                                             </SelectItem>
                                                                         ))}
                                                                     </Select>
-                                                                    <Input
-                                                                        type="text"
-                                                                        value={mapping.displayName}
-                                                                        onChange={(e) => updateHeaderName(idx, e.target.value)}
-                                                                        label='Header:'
-                                                                    />
                                                                     <NumberInput
                                                                         type="number"
                                                                         value={dataStartCells[idx].row + 1}
@@ -858,6 +860,7 @@ export default function ExcelImporter() {
                                                                         isRequired
                                                                         minValue={1}
                                                                     />
+
                                                                 </Card>
                                                             ))}
                                                         </div>
@@ -951,13 +954,13 @@ export default function ExcelImporter() {
                                         { key: 'stt', label: 'STT' },
                                         ...fields.map(f => ({ key: f.fieldName, label: f.nameDisplay }))
                                     ]}>
-                                        {(column) => <TableColumn className='border' key={column.key}>{column.label}</TableColumn>}
+                                        {(column) => <TableColumn key={column.key}>{column.label}</TableColumn>}
                                     </TableHeader>
                                     <TableBody items={previewData}>
                                         {(item) => (
                                             <TableRow key={item.key}>
                                                 {(columnKey) => (
-                                                    <TableCell className='border'>{item[columnKey]}</TableCell>
+                                                    <TableCell>{item[columnKey]}</TableCell>
                                                 )}
                                             </TableRow>
                                         )}
