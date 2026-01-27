@@ -1,6 +1,6 @@
 import { Tabs, Tab } from "@heroui/react";
 import { CircleCheck } from "lucide-react";
-import React, { useState, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 
 interface ExcelViewerProps {
@@ -26,6 +26,7 @@ export function ExcelViewer({
 }: ExcelViewerProps) {
     const [internalSelectedSheet, setInternalSelectedSheet] = useState(workbook.SheetNames[0]);
     const [scrollTop, setScrollTop] = useState(0);
+    const [maxDisplayRows, setMaxDisplayRows] = useState(100); // Bắt đầu với 100 hàng
     const tableRef = useRef<HTMLDivElement>(null);
 
     const selectedSheet = externalSelectedSheet || internalSelectedSheet;
@@ -37,8 +38,14 @@ export function ExcelViewer({
 
     const data = useMemo(() => {
         const worksheet = workbook.Sheets[selectedSheet];
-        return XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' }) as (string | number | boolean | null)[][];
-    }, [workbook, selectedSheet]);
+        const sheetData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' }) as (string | number | boolean | null)[][];
+        // Mở rộng data để có thể cuộn và thêm hàng mới
+        const extendedData = [...sheetData];
+        while (extendedData.length < maxDisplayRows) {
+            extendedData.push([]);
+        }
+        return extendedData;
+    }, [workbook, selectedSheet, maxDisplayRows]);
 
     const handleSheetChange = (sheetName: string) => {
         if (onSheetChange) {
@@ -47,6 +54,7 @@ export function ExcelViewer({
             setInternalSelectedSheet(sheetName);
         }
         setScrollTop(0);
+        setMaxDisplayRows(100); // Reset về 100 hàng khi đổi sheet
     };
 
     const isSheetConfigured = (sheetName: string): boolean => {
@@ -64,8 +72,20 @@ export function ExcelViewer({
     const endRow = Math.min(startRow + visibleRows, data.length);
 
     const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-        setScrollTop(e.currentTarget.scrollTop);
-    }, []);
+        const target = e.currentTarget;
+        const newScrollTop = target.scrollTop;
+        setScrollTop(newScrollTop);
+
+        // Kiểm tra nếu cuộn gần đến cuối (còn 10 hàng nữa là hết)
+        const scrollHeight = target.scrollHeight;
+        const clientHeight = target.clientHeight;
+        const scrollBottom = scrollHeight - newScrollTop - clientHeight;
+
+        if (scrollBottom < rowHeight * 10) {
+            // Tăng thêm 50 hàng
+            setMaxDisplayRows(prev => prev + 50);
+        }
+    }, [rowHeight]);
 
     const defaultCellClassName = (rowIdx: number, colIdx: number) => {
         const cellKey = `${rowIdx}-${colIdx}-${selectedSheet}`;
@@ -88,7 +108,7 @@ export function ExcelViewer({
 
     const handleMouseEnter = (event: React.MouseEvent<HTMLTableCellElement>, rowIdx: number, colIdx: number, text: any) => {
         const cellText = text ? text.toString() : '';
-        if (cellText.length > 13) {
+        if (cellText.length > 12) {
             const rect = event.currentTarget.getBoundingClientRect();
             let left = rect.right + 10;
             if (left + 300 > window.innerWidth) {
@@ -130,12 +150,13 @@ export function ExcelViewer({
                 </Tabs>
             </div>
 
+            {/* Header cố định */}
             <div className="overflow-hidden bg-gray-100 border-b border-gray-300">
                 <div style={{ width: maxCols * colWidth + 50, minWidth: '100%' }}>
                     <table className="border-collapse">
                         <thead>
                             <tr style={{ height: rowHeight }}>
-                                <th className="border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-700 bg-gray-100" style={{ width: '50px' }}>
+                                <th className="border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-700 bg-gray-100 sticky left-0 z-10" style={{ width: '50px' }}>
                                     #
                                 </th>
                                 {Array.from({ length: maxCols }).map((_, colIdx) => (
@@ -153,6 +174,7 @@ export function ExcelViewer({
                 </div>
             </div>
 
+            {/* Body với cột đầu tiên cố định */}
             <div
                 ref={tableRef}
                 className="overflow-auto relative bg-white"
@@ -173,7 +195,11 @@ export function ExcelViewer({
                                 const rowIdx = startRow + relRowIdx;
                                 return (
                                     <tr key={rowIdx} style={{ height: rowHeight }}>
-                                        <td className="border border-gray-300 text-gray-600 px-2 py-1 text-xs bg-gray-100 font-semibold text-center" style={{ width: '50px' }}>
+                                        {/* Cột số thứ tự - cố định khi cuộn ngang */}
+                                        <td
+                                            className="border border-gray-300 text-gray-600 px-2 py-1 text-xs bg-gray-100 font-semibold text-center sticky left-0 z-10"
+                                            style={{ width: '50px' }}
+                                        >
                                             {rowIdx + 1}
                                         </td>
                                         {Array.from({ length: maxCols }).map((_, colIdx) => {
