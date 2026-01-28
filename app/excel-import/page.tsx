@@ -108,7 +108,6 @@ const Tables: Table[] = [
             { fieldName: 'serviceRevenue', nameDisplay: 'Doanh thu dịch vụ phát sinh trong tháng', type: 'number', isRequired: false },
             { fieldName: 'vat', nameDisplay: 'VAT', type: 'number', isRequired: false },
             { fieldName: 'totalInvoiceAmount', nameDisplay: 'Tổng cộng', type: 'number', isRequired: false },
-
         ]
     },
     {
@@ -929,7 +928,7 @@ export default function ExcelImporter() {
                                             onCellClick={handleCellClick}
                                             getCellClassName={getCellStyle}
                                             readOnly={step === 'select_mode'}
-                                            sheetConfigured={sheetsConfigured}
+                                            sheetsConfigured={sheetsConfigured}
                                         />
                                     </div>}
                                 </div>

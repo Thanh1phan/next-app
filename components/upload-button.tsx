@@ -7,160 +7,23 @@ import { ExcelViewer } from '@/components/excel-viewer';
 import { Input } from '@heroui/input';
 import { Button } from '@heroui/button';
 import { Table, TableBody, TableCell, TableColumn, TableHeader, TableRow, useDisclosure, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader } from '@heroui/react';
-
-interface Field {
-    fieldName: string;
-    nameDisplay: string;
-    type: 'number' | 'string' | 'date' | 'bool';
-    isRequired: boolean;
-    columnPosition: number;
-    rowPosition: number;
-    sheetName: string;
-}
-
-interface Cell {
-    row: number;
-    col: number;
-    sheet: string;
-}
-
-interface CellError extends Cell {
-    err?: string;
-    index?: number;
-}
-
-interface DataStartCell extends Cell {
-    field: string;
-}
-
-interface TryCastResult<T> {
-    success: boolean;
-    value: T | null;
-    error?: string;
-}
-
-interface SubmitResult<T = any> {
-    isSuccess: boolean;
-    data: T;
-    cellsErr: CellError[];
-}
-
-const isEmptyValue = (value: any): boolean => {
-    return value === null ||
-        value === undefined ||
-        value === "" ||
-        (typeof value === 'string' && value.trim() === "");
-};
-
-const tryCast = (
-    value: any,
-    type: 'string' | 'number' | 'bool' | 'date'
-): TryCastResult<any> => {
-
-    if (value === undefined || value === null || value === '') {
-        return { success: true, value: null };
-    }
-
-    try {
-        switch (type) {
-            case 'number': {
-                const num = Number(value);
-                if (isNaN(num)) {
-                    return {
-                        success: false,
-                        value: null,
-                        error: `"${value}" không phải là số`
-                    };
-                }
-                return { success: true, value: num };
-            }
-
-            case 'bool': {
-                if (typeof value === 'boolean') {
-                    return { success: true, value };
-                }
-
-                if (value === 1 || value === '1' || value === 'true') {
-                    return { success: true, value: true };
-                }
-
-                if (value === 0 || value === '0' || value === 'false') {
-                    return { success: true, value: false };
-                }
-
-                return {
-                    success: false,
-                    value: null,
-                    error: `"${value}" không phải boolean`
-                };
-            }
-
-            case 'date': {
-                let date: Date | null = null;
-
-                // Xử lý Excel serial date (nếu value là số nguyên dương)
-                if (typeof value === 'number' && Number.isInteger(value) && value > 0) {
-                    const excelBaseDate = new Date(1899, 11, 30);
-                    date = new Date(excelBaseDate.getTime() + value * 86400000);
-                }
-                // Xử lý string dạng dd/MM/yyyy (hoặc dd-MM-yyyy)
-                else if (typeof value === 'string') {
-                    const ddmmyyyyRegex = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/;
-                    const match = value.match(ddmmyyyyRegex);
-                    if (match) {
-                        const day = parseInt(match[1], 10);
-                        const month = parseInt(match[2], 10);
-                        const year = parseInt(match[3], 10);
-                        date = new Date(year, month - 1, day);
-                    }
-                }
-
-                // Fallback: Sử dụng new Date(value) cho các định dạng khác
-                if (!date || isNaN(date.getTime())) {
-                    date = new Date(value);
-                }
-
-                if (isNaN(date.getTime())) {
-                    return {
-                        success: false,
-                        value: null,
-                        error: `"${value}" không phải ngày hợp lệ`
-                    };
-                }
-
-                return {
-                    success: true,
-                    value: date.toISOString()
-                };
-            }
-
-            case 'string':
-            default:
-                return {
-                    success: true,
-                    value: value.toString()
-                };
-        }
-    } catch (err) {
-        return {
-            success: false,
-            value: null,
-            error: (err as Error).message
-        };
-    }
-};
+import { API_BASE_URL, CellError, ConfigType, DataStartCell, DataTypes, ExcelConfig, ExcelConfigDetail, Field, SubmitResult, Tables } from '@/types/excel-type';
+import { extractDataWithConfig, isEmptyValue, tryCast } from '@/utils/excel';
 
 interface ExcelImporterProps {
-    configId: number;
-    name: string;
+    departmentId: number;
+    configType: number;
+    name?: string;
+    color?: "default" | "primary" | "secondary" | "success" | "warning" | "danger" | undefined;
+    size?: "sm" | "md" | "lg" | undefined;
 }
 
-export default function ExcelImporter({ configId, name }: ExcelImporterProps) {
+export default function UploadButton({ departmentId, configType, name, color, size }: ExcelImporterProps) {
     const [file, setFile] = useState<File | null>(null);
     const [workbook, setWorkbook] = useState<XLSX.WorkBook | null>(null);
     const [selectedSheet, setSelectedSheet] = useState('');
     const [fields, setFields] = useState<Field[]>([]);
-    const [dataStartCells, setDataStartCells] = useState<DataStartCell[]>([]);
+    const [dataStartCells, setDataStartCells] = useState<ExcelConfigDetail[]>([]);
     const [extractedData, setExtractedData] = useState<Record<string, any>[]>([]);
     const [previewData, setPreviewData] = useState<Record<string, any>[]>([]);
     const { isOpen: isImportOpen, onOpen: onImportOpen, onOpenChange: onImportOpenChange } = useDisclosure();
@@ -169,47 +32,33 @@ export default function ExcelImporter({ configId, name }: ExcelImporterProps) {
     const [loading, setLoading] = useState(false);
     const [sheetsConfigured, setSheetsConfigured] = useState<Set<string>>(new Set());
 
-    const mapDataType = (dbType: string): Field['type'] => {
-        switch (dbType) {
-            case 'Integer':
-            case 'Float':
-                return 'number';
-            case 'Date':
-                return 'date';
-            case 'Boolean':
-                return 'bool';
-            case 'String':
-            default:
-                return 'string';
-        }
-    };
-
-    const fetchConfig = async () => {
+    const fetchConfigDetails = async (configId: number) => {
         setLoading(true);
         try {
             const res = await fetch(`https://localhost:7034/excel-config/${configId}/details`);
             if (!res.ok) throw new Error('Lỗi fetch config details');
-            const details = await res.json();
-            const mappedFields: Field[] = details.map((d: any) => ({
-                fieldName: d.fieldName,
-                nameDisplay: d.displayName,
-                type: mapDataType(d.dataType),
-                isRequired: d.isRequired,
-                columnPosition: d.columnPosition,
-                rowPosition: d.rowPosition,
-                sheetName: d.sheetName
-            }));
-            setFields(mappedFields);
-            setDataStartCells(mappedFields.map((f: Field) => ({
-                row: f.rowPosition,
-                col: f.columnPosition,
-                sheet: f.sheetName,
-                field: f.fieldName,
-            })));
+            const details: ExcelConfigDetail[] = await res.json();
+            setFields(Tables);
+            setDataStartCells(details);
 
-            setSheetsConfigured(new Set(mappedFields.map(m => m.sheetName)));
+            setSheetsConfigured(new Set(details.map(m => m.sheetName)));
         } catch (error) {
             alert('Lỗi fetch config: ' + (error as Error).message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const fetchConfig = async (): Promise<ExcelConfig> => {
+        setLoading(true);
+        try {
+            const res = await fetch(`${API_BASE_URL}/excel-config/config?departmentId=${departmentId}&configType=${configType}`);
+            if (!res.ok) throw new Error('Lỗi fetch config details');
+            const config: ExcelConfig = await res.json();
+            return config;
+        } catch (error) {
+            alert('Lỗi fetch config: ' + (error as Error).message);
+            throw error;
         } finally {
             setLoading(false);
         }
@@ -253,69 +102,8 @@ export default function ExcelImporter({ configId, name }: ExcelImporterProps) {
     };
 
     const checkRequiredFields = () => {
-        const mappedFields = new Set(dataStartCells.map(d => d.field));
+        const mappedFields = new Set(dataStartCells.map(d => d.fieldName));
         return fields.filter(f => f.isRequired).every(f => mappedFields.has(f.fieldName));
-    };
-
-    const extractDataWithConfig = (
-        workbook: XLSX.WorkBook,
-        dataStartCells: DataStartCell[],
-        fields: Field[]
-    ): SubmitResult<Record<string, any>[]> => {
-        const result: Record<string, any>[] = [];
-        let isSuccess: boolean = true;
-        let cellsErr: CellError[] = [];
-
-        const columnData: any[][] = dataStartCells.map(cfg => {
-            const worksheet = workbook.Sheets[cfg.sheet];
-            if (!worksheet) return [];
-
-            const sheetData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null }) as any[][];
-            const data: any[] = [];
-            for (let i = cfg.row; i < sheetData.length; i++) {
-                const row = sheetData[i] || [];
-                data.push(row[cfg.col] ?? null);
-            }
-            return data;
-        });
-
-        const maxRows = Math.max(...columnData.map(col => col.length), 0);
-
-        for (let rowIdx = 0; rowIdx < maxRows; rowIdx++) {
-            const dataRow: Record<string, any> = {};
-            let allEmpty = true;
-
-            for (let colIdx = 0; colIdx < dataStartCells.length; colIdx++) {
-                const value = columnData[colIdx][rowIdx] ?? null;
-                const fieldName = dataStartCells[colIdx].field;
-                const field = fields.find(f => f.fieldName === fieldName);
-
-                let res = tryCast(value, field?.type ?? 'string');
-                if (!res.success) {
-                    const startCol = dataStartCells[colIdx].col;
-                    const startRow = dataStartCells[colIdx].row;
-                    const sheet = dataStartCells[colIdx].sheet;
-                    const mess = res.error ?? '';
-                    cellsErr.push({
-                        col: startCol,
-                        row: startRow + rowIdx,
-                        sheet: sheet,
-                        index: colIdx,
-                        err: mess
-                    });
-                    isSuccess = false;
-                }
-                dataRow[fieldName] = res.success ? res.value : res.error;
-                if (!isEmptyValue(value)) {
-                    allEmpty = false;
-                }
-            }
-
-            if (allEmpty) break;
-            result.push(dataRow);
-        }
-
-        return { isSuccess, data: result, cellsErr };
     };
 
     const handleExtract = () => {
@@ -347,7 +135,7 @@ export default function ExcelImporter({ configId, name }: ExcelImporterProps) {
         if (cellError.some(cell => cell.row === rowIdx && cell.col === colIdx && cell.sheet === sheet)) {
             return 'bg-red-500 text-white font-semibold border-2 border-blue-500';
         }
-        if (dataStartCells.some(cell => cell.row === rowIdx && cell.col === colIdx && cell.sheet === sheet)) {
+        if (dataStartCells.some(cell => cell.rowPosition === rowIdx && cell.columnPosition === colIdx && cell.sheetName === sheet)) {
             return 'bg-blue-200 border-2 border-gray-400';
         }
         return 'bg-white';
@@ -363,15 +151,26 @@ export default function ExcelImporter({ configId, name }: ExcelImporterProps) {
         setDataStartCells([]);
     };
 
-    useEffect(() => {
-        if (workbook) {
-            fetchConfig();
+    const loadConfig = async () => {
+        const config = await fetchConfig();
+        if (config?.id) {
+            await fetchConfigDetails(config.id);
         }
+    };
+
+    useEffect(() => {
+        if (!workbook) return;
+
+        loadConfig();
     }, [workbook]);
 
     return (
         <>
-            <Button onPress={onImportOpen}>
+            <Button
+                onPress={onImportOpen}
+                color={color}
+                size={size}
+            >
                 <Upload className="mx-auto" size={24} /> {name}
             </Button>
 
@@ -432,7 +231,7 @@ export default function ExcelImporter({ configId, name }: ExcelImporterProps) {
                                         onSheetChange={setSelectedSheet}
                                         getCellClassName={getCellStyle}
                                         readOnly={true}
-                                        sheetConfigured={sheetsConfigured}
+                                        sheetsConfigured={sheetsConfigured}
                                     />
                                 )}
 

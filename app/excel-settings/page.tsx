@@ -1,52 +1,17 @@
 'use client'
 
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Trash2, Save, X, Settings, Loader2, RefreshCw, EyeIcon, EditIcon, DeleteIcon } from 'lucide-react';
-import { Button, ButtonGroup, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow, Tooltip } from '@heroui/react';
-
-// Enums
-enum DataTypes {
-    String = 0,
-    Number = 1,
-    Date = 2,
-    Boolean = 3,
-    Decimal = 4
-}
-
-enum ConfigType {
-    Salary = 0,
-    Insurance = 1
-}
-
-// Types
-interface ExcelConfigDetail {
-    id: number;
-    configId: number;
-    fieldName: string;
-    displayName: string;
-    columnPosition: number;
-    rowPosition: number;
-    dataType: DataTypes;
-    isRequired: boolean;
-}
-
-interface ExcelConfig {
-    id: number;
-    templateFileName: string;
-    configName: string;
-    departmentId: number;
-    configType: ConfigType;
-    details?: ExcelConfigDetail[];
-    acctions: string;
-}
-
-const API_BASE_URL = 'https://localhost:7034';
+import { Plus, RefreshCw, EyeIcon, DeleteIcon } from 'lucide-react';
+import { addToast, Button, ButtonGroup, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow } from '@heroui/react';
+import { API_BASE_URL, ConfigType, DepartmentId, ExcelConfig } from '@/types/excel-type';
+import { useRouter } from 'next/navigation';
 
 const ExcelConfigManager = () => {
     const [configs, setConfigs] = useState<ExcelConfig[]>([]);
     const [selectedConfig, setSelectedConfig] = useState<ExcelConfig | null>(null);
     const [isLoadingConfigs, setIsLoadingConfigs] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const router = useRouter();
 
     // Fetch all configs
     const fetchConfigs = async () => {
@@ -101,17 +66,26 @@ const ExcelConfigManager = () => {
                 return item.configName;
 
             case "departmentId":
-                return item.departmentId;
+                return DepartmentId[item.departmentId];
 
             case "configType":
                 return ConfigType[item.configType];
             case "actions":
                 return (
                     <ButtonGroup size='sm'>
-                        <Button onPress={() => { }}>
+                        <Button onPress={() => { router.push(`/excel-edit/${item.id}`); }}>
                             <EyeIcon />
                         </Button>
-                        <Button color="danger">
+                        <Button
+                            color="danger"
+                            onPress={() => {
+                                addToast({
+                                    title: "Toast title",
+                                    description: "Toast displayed successfully",
+                                    radius: 'sm',
+                                })
+                            }}
+                        >
                             <DeleteIcon />
                         </Button>
                     </ButtonGroup>
@@ -132,7 +106,7 @@ const ExcelConfigManager = () => {
                     </div>
                     <div className='grid grid-cols-2 gap-1'>
                         <Button
-                            onClick={handleRefreshConfigs}
+                            onPress={() => router.push('/excel-create')}
                             disabled={isLoadingConfigs}
                             color='success'
                         >
@@ -153,7 +127,7 @@ const ExcelConfigManager = () => {
                 maxTableHeight={500}
                 isVirtualized
             >
-                <TableHeader>
+                <TableHeader className='sticky top-0 '>
                     <TableColumn key="index">STT</TableColumn>
                     <TableColumn key="configName">Tên config</TableColumn>
                     <TableColumn key="departmentId">DepartmentId</TableColumn>
@@ -169,7 +143,7 @@ const ExcelConfigManager = () => {
                 </TableBody>
             </Table>
 
-        </div>
+        </div >
     );
 };
 

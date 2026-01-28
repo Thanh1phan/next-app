@@ -7,18 +7,19 @@ import { Button, Input, Select, SelectItem, Table, TableHeader, TableColumn, Tab
 import { RefreshCw, Save, Plus, Trash2, Edit, Upload, CheckCircle, X, Settings, Check, Download, View } from "lucide-react";
 import { ChangeEvent, useEffect, useState } from "react";
 import * as XLSX from 'xlsx';
+import { useParams } from 'next/navigation';
 
-export default function ExcelCreate() {
+export default function ExcelEdit() {
+
+    const { id } = useParams<{ id: string }>();
     const [config, setConfig] = useState<ExcelConfig>({
-        id: 0,
+        id: Number(id),
         templateFileName: '',
         configName: '',
         departmentId: 0,
         configType: ConfigType.Salary,
-        details: [],
         acctions: ''
     });
-
     const [details, setDetails] = useState<ExcelConfigDetail[]>([]);
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -28,7 +29,7 @@ export default function ExcelCreate() {
     const [selectedSheet, setSelectedSheet] = useState('');
 
     const [hasHeader, setHasHeader] = useState<boolean | null>(null);
-    const [step, setStep] = useState<Step>('select_mode');
+    const [step, setStep] = useState<Step>('configure');
     const [headerMappings, setHeaderMappings] = useState<HeaderMapping[]>([]);
     const [selectedHeaderCells, setSelectedHeaderCells] = useState<Set<string>>(new Set());
     const [sheetsConfigured, setsheetsConfigured] = useState<Set<string>>(new Set());
@@ -40,15 +41,6 @@ export default function ExcelCreate() {
     const [errors, setErrors] = useState<Record<string, string[]>>({});
     const [numberSelected, setNumberSelected] = useState<number>();
 
-
-    const dataTypeLabels = {
-        [DataTypes.String]: 'Chuỗi',
-        [DataTypes.Number]: 'Số',
-        [DataTypes.Date]: 'Ngày',
-        [DataTypes.Boolean]: 'Boolean',
-        [DataTypes.Decimal]: 'Số thập phân'
-    };
-
     const configTypeLabels = {
         [ConfigType.Salary]: 'Lương',
         [ConfigType.Insurance]: 'Bảo hiểm'
@@ -59,6 +51,83 @@ export default function ExcelCreate() {
         [DepartmentId.DepartmentA]: 'DepartmentA',
         [DepartmentId.DepartmentB]: 'DepartmentB'
     };
+
+    // Fetch config
+    const fetchConfig = async (): Promise<ExcelConfig> => {
+        setError(null);
+        try {
+            const response = await fetch(`${API_BASE_URL}/excel-config/${id}`);
+            if (!response.ok) throw new Error('Không thể tải cấu hình');
+            const data = await response.json();
+            setConfig(data);
+            return data;
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Đã xảy ra lỗi');
+            console.error('Error fetching config:', err);
+            throw err;
+        } finally {
+        }
+    };
+
+    // Fetch details
+    const fetchDetails = async () => {
+        setError(null);
+        try {
+            const response = await fetch(`${API_BASE_URL}/excel-config/${id}/details`);
+            if (!response.ok) throw new Error('Không thể tải chi tiết cấu hình');
+            const data = await response.json();
+            setDetails(data);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Đã xảy ra lỗi');
+            console.error('Error fetching details:', err);
+        } finally {
+        }
+    };
+
+    const downloadAsFile = async (fileName: string): Promise<File> => {
+        console.log(fileName)
+        const response = await fetch(
+            `${API_BASE_URL}/excel-config/download?fileName=${encodeURIComponent(fileName)}`
+        );
+
+        if (!response.ok) {
+            throw new Error('Không thể tải file');
+        }
+
+        const blob = await response.blob();
+
+        return new File([blob], fileName, {
+            type: blob.type
+        });
+    };
+
+    // Initial load
+    useEffect(() => {
+        const loadData = async () => {
+            const configRes = await fetchConfig();
+            await fetchDetails();
+            const file = await downloadAsFile(configRes.templateFileName);
+            if (!!file) {
+                setSelectedFile(file);
+                const reader = new FileReader();
+
+                reader.onload = (event) => {
+                    try {
+                        const wbRaw = XLSX.read(event.target?.result, { type: 'binary' });
+                        const wb = filterVisibleWorkbook(wbRaw);
+                        setWorkbook(wb);
+                        setSelectedSheet(wb.SheetNames[0]);
+                    } catch (error) {
+                        alert('Lỗi khi đọc file Excel: ' + (error as Error).message);
+                    }
+                };
+
+                reader.readAsBinaryString(file);
+                setFileds(Tables);
+            }
+        };
+        loadData();
+    }, []);
 
     // Save config
     const handleSaveConfig = async (): Promise<ExcelConfig> => {
@@ -160,8 +229,8 @@ export default function ExcelCreate() {
         const fileName = file?.name ?? "";
         if (file && (file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || file.type === 'application/vnd.ms-excel')) {
             setSelectedFile(file);
-            setFileName(fileName);
-            console.log('file')
+            const guid = crypto.randomUUID();
+            setFileName(fileName)
         };
 
         if (!file) return;
@@ -190,29 +259,25 @@ export default function ExcelCreate() {
 
     // Hàm gửi file lên BE
     const handleUpload = async () => {
-        if (!selectedFile) return;
+        if (!selectedFile) {
+            return;
+        }
 
         const formData = new FormData();
-        formData.append('file', selectedFile);
+        formData.append(fileName, selectedFile);
 
         try {
             const response = await fetch(`${API_BASE_URL}/excel-config/upload`, {
-                method: 'POST',
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                },
                 body: formData,
+                method: 'POST'
             });
-
-            if (!response.ok) {
-                const error = await response.text();
-                throw new Error(error);
-            }
-
-            alert('Upload thành công');
         } catch (error) {
-            console.error(error);
-            alert('Upload thất bại');
+
         }
     };
-
 
     const filterVisibleWorkbook = (wb: XLSX.WorkBook): XLSX.WorkBook => {
         const visibleSheetNames = wb.SheetNames.filter(name => {
@@ -244,6 +309,15 @@ export default function ExcelCreate() {
         setErrors({});
         setCellError([]);
         setNumberSelected(undefined);
+        setConfig({
+            id: Number(id),
+            templateFileName: '',
+            configName: '',
+            departmentId: 0,
+            configType: ConfigType.Salary,
+            acctions: ''
+        });
+        setWorkbook(null);
     };
 
     const handleSelectMode = (withHeader: boolean) => {
@@ -531,7 +605,10 @@ export default function ExcelCreate() {
                             </div>
                         </div>
                         <Button
-                            onPress={() => setSelectedFile(null)}
+                            onPress={() => {
+                                setSelectedFile(null);
+                                resetConfiguration();
+                            }}
                             color='danger'
                             startContent={<X size={16} />}
                         >
@@ -552,6 +629,7 @@ export default function ExcelCreate() {
                         label="Department ID"
                         onChange={(e) => setConfig(prev => ({ ...prev, departmentId: parseInt(e.target.value) || 0 }))}
                         isRequired
+                        selectedKeys={[config.departmentId.toString()]}
                     >
                         {Object.entries(configTypeDepartments).map(([key, value]) => (
                             <SelectItem key={key} textValue={value}>
@@ -563,6 +641,7 @@ export default function ExcelCreate() {
                         label="Loại cấu hình"
                         onChange={(e) => setConfig(prev => ({ ...prev, configType: parseInt(e.target.value) as ConfigType }))}
                         isRequired
+                        selectedKeys={[config.configType.toString()]}
                     >
                         {Object.entries(configTypeLabels).map(([key, value]) => (
                             <SelectItem key={key} textValue={value}>

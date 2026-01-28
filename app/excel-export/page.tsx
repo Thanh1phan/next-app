@@ -1,10 +1,10 @@
-import ExcelImporter from "@/components/upload-button";
+import UploadButton from "@/components/upload-button";
 
 export default function ExcelExport() {
     return (
         <div>
-            <ExcelImporter configId={1009} name="Upload bảng lương" ></ExcelImporter >
-            <ExcelImporter configId={1010} name="Upload bảng lương" ></ExcelImporter >
+            <UploadButton departmentId={1} configType={0} name="Upload bảng lương" color="success" ></UploadButton >
+            <UploadButton departmentId={1} configType={1} name="Upload bảng lương" size="lg"></UploadButton >
         </div>
     )
 }

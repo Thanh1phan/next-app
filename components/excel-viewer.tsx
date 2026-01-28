@@ -11,7 +11,7 @@ interface ExcelViewerProps {
     onSheetChange?: (sheetName: string) => void;
     highlightedCells?: Set<string>;
     readOnly?: boolean;
-    sheetConfigured: Set<string>;
+    sheetsConfigured?: Set<string>;
 }
 
 export function ExcelViewer({
@@ -22,11 +22,11 @@ export function ExcelViewer({
     onSheetChange,
     highlightedCells = new Set(),
     readOnly = false,
-    sheetConfigured = new Set()
+    sheetsConfigured = new Set()
 }: ExcelViewerProps) {
     const [internalSelectedSheet, setInternalSelectedSheet] = useState(workbook.SheetNames[0]);
     const [scrollTop, setScrollTop] = useState(0);
-    const [maxDisplayRows, setMaxDisplayRows] = useState(100); // Bắt đầu với 100 hàng
+    const [maxDisplayRows, setMaxDisplayRows] = useState(100);
     const tableRef = useRef<HTMLDivElement>(null);
 
     const selectedSheet = externalSelectedSheet || internalSelectedSheet;
@@ -39,7 +39,6 @@ export function ExcelViewer({
     const data = useMemo(() => {
         const worksheet = workbook.Sheets[selectedSheet];
         const sheetData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' }) as (string | number | boolean | null)[][];
-        // Mở rộng data để có thể cuộn và thêm hàng mới
         const extendedData = [...sheetData];
         while (extendedData.length < maxDisplayRows) {
             extendedData.push([]);
@@ -54,11 +53,11 @@ export function ExcelViewer({
             setInternalSelectedSheet(sheetName);
         }
         setScrollTop(0);
-        setMaxDisplayRows(100); // Reset về 100 hàng khi đổi sheet
+        setMaxDisplayRows(100);
     };
 
     const isSheetConfigured = (sheetName: string): boolean => {
-        return sheetConfigured?.has(sheetName) ?? false;
+        return sheetsConfigured?.has(sheetName) ?? false;
     }
 
     const handleCellClick = (rowIdx: number, colIdx: number) => {
@@ -76,13 +75,11 @@ export function ExcelViewer({
         const newScrollTop = target.scrollTop;
         setScrollTop(newScrollTop);
 
-        // Kiểm tra nếu cuộn gần đến cuối (còn 10 hàng nữa là hết)
         const scrollHeight = target.scrollHeight;
         const clientHeight = target.clientHeight;
         const scrollBottom = scrollHeight - newScrollTop - clientHeight;
 
         if (scrollBottom < rowHeight * 10) {
-            // Tăng thêm 50 hàng
             setMaxDisplayRows(prev => prev + 50);
         }
     }, [rowHeight]);
@@ -195,7 +192,6 @@ export function ExcelViewer({
                                 const rowIdx = startRow + relRowIdx;
                                 return (
                                     <tr key={rowIdx} style={{ height: rowHeight }}>
-                                        {/* Cột số thứ tự - cố định khi cuộn ngang */}
                                         <td
                                             className="border border-gray-300 text-gray-600 px-2 py-1 text-xs bg-gray-100 font-semibold text-center sticky left-0 z-10"
                                             style={{ width: '50px' }}
